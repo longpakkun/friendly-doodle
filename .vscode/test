@@ -1,14 +1,156 @@
-{
-  "name": "C++ Launch (Windows)",
-  "type": "cppvsdbg",
-  "request": "launch",
-  "program": "C:\\app1\\Debug\\app1.exe",
-  "symbolSearchPath": "C:\\Symbols;C:\\SymbolDir2",
-  "externalConsole": true,
-  "logging": {
-    "moduleLoad": false,
-    "trace": true
-  },
-  "visualizerFile": "${workspaceFolder}/my.natvis",
-  "showDisplayString": true
+#include <stdio.h>
+#include <unistd.h>
+
+#include <cstring>
+#include <string>
+
+char hashed_serial[14];
+
+void PrintHelp(char* argv0) {
+  printf("Usage: %s [options]\n", argv0);
+  printf("Options:\n");
+  printf("  -h <serial> \tSerial number to hash\n");
+  printf("  -s <serial> \tValidate hash for provided serial\n");
+}
+
+bool isQ(char c) { return c == 'Q'; }
+
+bool isProductCode(char c) { return (c == 'D' || c == 'S'); }
+
+bool isAlphaNumeric(char c) {
+  // I and O are invalid AlphaNumeric characters
+  if (c == 'I' || c == 'O') {
+    return false;
+  }
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z');
+}
+
+bool isDash(char c) { return c == '-'; }
+
+bool isSupplierCode(char c) {
+  // TODO: Add addtional supplier/location codes here
+  return c == 'B';  // B == Pega, Haiphong
+}
+
+// Maps 0-9, A-Z to an integer 0-35
+int CharToNum(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'A' && c <= 'Z') {
+    return 10 + (c - 'A');
+  }
+  fprintf(stderr, "Invalid character [%c %d]\n", c, c);
+  exit(EXIT_FAILURE);
+}
+
+// Maps 0-35 to characters '0'-'9', A-Z
+char NumToChar(int i) {
+  if (i >= 0 && i <= 9) {
+    return '0' + i;
+  }
+  if (i >= 10 && i <= 35) {
+    return 'A' + (i - 10);
+  }
+  fprintf(stderr, "Invalid input [%d]\n", i);
+  exit(EXIT_FAILURE);
+}
+
+char* HashSerial(char* serial) {
+  if (strlen(serial) != 11) {
+    fprintf(stderr,
+            "Invalid serial format:\t[%s]\n"
+            "expected\t\t[QPV-RLSSSSS]\n ",
+            serial);
+    exit(EXIT_FAILURE);
+  }
+  int checksum = 0;
+  int i = 0;
+  if (!isQ(serial[i])) {
+    fprintf(stderr, "Expected [Q], found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  checksum += CharToNum(serial[i++]);
+
+  if (!isProductCode(serial[i])) {
+    fprintf(stderr, "Expected [D|S], found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  checksum += CharToNum(serial[i++]);
+
+  if (!isAlphaNumeric(serial[i])) {
+    fprintf(stderr, "Expected alphanumeric, found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  checksum += CharToNum(serial[i++]);
+
+  if (!isDash(serial[i])) {
+    fprintf(stderr, "Expected [-], found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  // Don't include dash as part of checksum
+  i++;
+
+  if (!isAlphaNumeric(serial[i])) {
+    fprintf(stderr, "Expected alphanumeric, found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  checksum += CharToNum(serial[i++]);
+
+  if (!isSupplierCode(serial[i])) {
+    fprintf(stderr, "Expected supplier/location code, found: %c\n", serial[i]);
+    exit(EXIT_FAILURE);
+  }
+  checksum += CharToNum(serial[i++]);
+
+  for (int s = 0; s < 5; s++) {
+    if (!isAlphaNumeric(serial[i])) {
+      fprintf(stderr, "Expected alphanumeric, found: %c\n", serial[i]);
+      exit(EXIT_FAILURE);
+    }
+    checksum += CharToNum(serial[i++]);
+  }
+
+  snprintf(hashed_serial, sizeof(hashed_serial), "%s%c%c", serial,
+           NumToChar(checksum / 35), NumToChar(checksum % 35));
+  return hashed_serial;
+}
+
+bool ValidateSerial(char* serial) {
+  if (strlen(serial) != 13) {
+    fprintf(stderr,
+            "Invalid serial format:\t[%s]\n"
+            "expected\t\t[QPV-RLSSSSSHH]\n ",
+            serial);
+    exit(EXIT_FAILURE);
+  }
+  char stripped_serial[12];
+  strncpy(stripped_serial, serial, sizeof(stripped_serial) - 1);
+  char* calculated_serial = HashSerial(stripped_serial);
+  bool result = (CharToNum(serial[11]) * 35 + CharToNum(serial[12]) ==
+                 CharToNum(calculated_serial[11]) * 35 +
+                     CharToNum(calculated_serial[12]));
+  if (!result) {
+    printf("Calculated hashed serial %s\n", calculated_serial);
+  }
+  return result;
+}
+
+int main(int argc, char* argv[]) {
+  int opt;
+  while ((opt = getopt(argc, argv, "h:s:")) != -1) {
+    switch (opt) {
+      case 'h':
+        printf("Hashed Serial: %s\n", HashSerial(optarg));
+        break;
+      case 's':
+        printf("Checking serial %s\n", optarg);
+        ValidateSerial(optarg) ? printf("PASS\n") : printf("FAIL\n");
+        break;
+      default:
+        PrintHelp(argv[0]);
+        exit(EXIT_FAILURE);
+    }
+  }
+  return 0;
 }
